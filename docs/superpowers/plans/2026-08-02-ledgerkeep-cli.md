@@ -83,7 +83,16 @@ Stated once here so the implementer does not "correct" them back:
 3. `src/keeper/drift.ts` is a new module, split out of `policy.ts`.
 4. `LK_RENT_VAULT_ID` is absent. No command reads it.
 5. Read-only commands use `NULL_ACCOUNT` via `queryContract`, so they need no signing key.
-6. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+6. Task 10 carries a live testnet smoke check. It is the first network contact in the
+   build and gates the registry commit, so RPC and key-construction faults surface at
+   the point they are introduced rather than after the commands are built on top.
+7. `.github/workflows/ci.yml` is created in Task 2, not Task 1, and Task 1 does not gate
+   on `npm run build`. Task 1 creates no `src/` file, so `tsc` exits 2 on `TS18003: No
+   inputs were found` — correct behaviour for an empty source tree, and not suppressible
+   the way vitest's `passWithNoTests` is. Adding a placeholder `src/index.ts` to satisfy
+   the gate would be exactly the stub this project forbids. Deferring the workflow by one
+   task also means CI's first run is green rather than red.
+8. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -93,11 +102,19 @@ Stated once here so the implementer does not "correct" them back:
 ### Task 1: Scaffold the repository
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `.gitignore`, `.prettierrc.json`, `eslint.config.js`, `.env.example`, `README.md`, `LICENSE`, `.github/workflows/ci.yml`, `vitest.config.ts`
+- Create: `package.json`, `tsconfig.json`, `.gitignore`, `.prettierrc.json`, `eslint.config.js`, `.env.example`, `README.md`, `LICENSE`, `vitest.config.ts`
 
 **Interfaces:**
 - Consumes: nothing
 - Produces: `npm run build`, `npm run lint`, `npm run format:check`, `npm test` scripts that all later tasks run
+
+**`npm run build` does not pass in this task, and that is expected.** `tsconfig.json`
+sets `include: ["src/**/*.ts"]` and Task 1 creates no source file, so `tsc` exits 2 with
+`TS18003: No inputs were found`. That is the empty-tree case, not a broken build, and
+`tsc` has no `passWithNoTests` equivalent to suppress it. Do not add a placeholder
+`src/` file to silence it — Task 2 writes the first real source file and the build
+passes from there on. The CI workflow is deferred to Task 2 for the same reason, so
+CI's first run lands on a commit where all four checks pass.
 
 - [ ] **Step 1: Create `package.json`**
 
@@ -284,49 +301,27 @@ Apache-2.0
 cp ../Ledgerkeep-core/LICENSE ./LICENSE
 ```
 
-- [ ] **Step 10: Create `.github/workflows/ci.yml`**
-
-```yaml
-name: ci
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [22, 24]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test
-```
-
-- [ ] **Step 11: Install and verify the toolchain is clean**
+- [ ] **Step 10: Install and verify the toolchain**
 
 ```bash
 npm install
-npm run build && npm run lint && npm test
+npm run lint && npm test
 ```
 
-Expected: `build` succeeds and emits `dist/`. `lint` passes with no files matched errors. `test` reports "No test files found" and exits 0 — vitest `run` with no tests exits 0 only if `passWithNoTests` is set, so if it fails here, add `"passWithNoTests": true` to `vitest.config.ts` under `test`.
+Expected: `lint` exits 0 (it matches no files yet, which is not an error). `test`
+reports "No test files found" and exits 0 — vitest `run` with no tests exits 0 only if
+`passWithNoTests` is set, so if it fails here, add `"passWithNoTests": true` to
+`vitest.config.ts` under `test`.
 
-- [ ] **Step 12: Commit the scaffold**
+Do **not** run `npm run build` as a gate here. See the note under **Files** above: with
+no `src/` file, `tsc` exits 2 on `TS18003`, which is the correct result for an empty
+source tree. Task 2 adds the first source file, and the build gate applies from that
+task onward.
 
-Stage by explicit path even here. `git add .` would swallow the README, `.env.example`,
-and CI workflow that Steps 13 and 14 commit separately, leaving them with nothing to
-stage.
+- [ ] **Step 11: Commit the scaffold**
+
+Stage by explicit path even here. `git add .` would swallow the README and
+`.env.example` that Step 12 commits separately, leaving it with nothing to stage.
 
 ```bash
 git add package.json package-lock.json tsconfig.json .gitignore .prettierrc.json eslint.config.js vitest.config.ts LICENSE
@@ -334,7 +329,7 @@ git commit -m "chore(setup): scaffold package.json, tsconfig, eslint, prettier, 
 git push origin main
 ```
 
-- [ ] **Step 13: Commit the docs**
+- [ ] **Step 12: Commit the docs**
 
 ```bash
 git add README.md .env.example
@@ -342,22 +337,15 @@ git commit -m "docs(setup): add README skeleton and .env.example"
 git push origin main
 ```
 
-- [ ] **Step 14: Commit the CI workflow**
-
-```bash
-git add .github/workflows/ci.yml
-git commit -m "ci(setup): add build, lint, test workflow"
-git push origin main
-```
-
-Confirm the tree is clean afterward: `git status --porcelain` prints nothing.
+Confirm the tree is clean afterward: `git status --porcelain` prints nothing apart from
+untracked `.superpowers/`.
 
 ---
 
 ### Task 2: RPC client and network config
 
 **Files:**
-- Create: `src/rpc/client.ts`
+- Create: `src/rpc/client.ts`, `.github/workflows/ci.yml`
 
 **Interfaces:**
 - Consumes: nothing
@@ -430,6 +418,54 @@ the verification is recorded in the plan and re-run in Step 1 — so this is one
 ```bash
 git add src/rpc/client.ts
 git commit -m "feat(rpc): add Server client and network config"
+git push origin main
+```
+
+- [ ] **Step 5: Create `.github/workflows/ci.yml`**
+
+This lands here rather than in Task 1 so CI's first run is against a commit where all
+four checks pass. In Task 1 there is no `src/` file, so `npm run build` fails on
+`TS18003` and the workflow's first run would be red.
+
+```yaml
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+```
+
+- [ ] **Step 6: Verify the workflow's checks pass locally before pushing it**
+
+Run: `npm run format:check && npm run lint && npm run build && npm test`
+Expected: all four clean. This is the exact sequence the workflow runs, so a local pass
+means the first CI run is green. If `format:check` fails, run `npm run format` and
+re-check.
+
+- [ ] **Step 7: Commit the CI workflow**
+
+```bash
+git add .github/workflows/ci.yml
+git commit -m "ci(setup): add build, lint, test workflow"
 git push origin main
 ```
 
@@ -1923,7 +1959,71 @@ Expected: PASS, 6 tests.
 Run: `npm run build && npm run lint && npm test`
 Expected: all clean.
 
-- [ ] **Step 6: Commit implementation and test separately**
+- [ ] **Step 6: Live smoke check against testnet**
+
+**This is the first code in the project that talks to a real network.** Everything
+before it is offline. Run it here rather than after the commands are built, so a
+broken RPC URL, network passphrase, or contract-id assumption fails at the task
+that introduced it instead of eight tasks later.
+
+Requires a configured environment. Load your `.env` first:
+
+```bash
+set -a && . ./.env && set +a
+npm run build
+node --input-type=module -e "
+import { makeServer } from './dist/rpc/client.js';
+import { discoverAll } from './dist/registry/discover.js';
+const server = makeServer(process.env.LK_RPC_URL);
+const entries = await discoverAll(server, process.env.LK_REGISTRY_ID);
+console.log('registered contracts:', entries.length);
+for (const e of entries) {
+  console.log(' -', e.contract, 'keys=' + e.keysXdr.length,
+              'threshold=' + e.threshold, 'extendTo=' + e.extendTo);
+}
+"
+```
+
+Expected against the deployed testnet set: **at least 2 entries.** One is the
+registry itself, which self-registers in its constructor and will show
+`keys=1 threshold=100000 extendTo=500000`. Another is the long_escrow, which shows
+`keys=3`. Its contract id must equal `LK_REGISTRY_ID` for the first and your
+`LK_LONG_ESCROW_ID` for the second.
+
+Read the failure rather than working around it:
+
+| Symptom | Cause |
+|---|---|
+| `could not read registry count` | `LK_RPC_URL` wrong, unreachable, or pointed at a network where the registry is not deployed |
+| `is not a valid contract id` | `LK_REGISTRY_ID` malformed |
+| `has no method 'count'` | `LK_REGISTRY_ID` points at some other contract |
+| 0 entries | Connected to the wrong network, or `init_testnet.sh` never ran |
+| `keys_xdr` decode error | The manifest on-chain differs from what `decodeEntry` expects — **stop and report**, do not loosen the decoder |
+
+Confirm one manifest decodes to the real escrow keys:
+
+```bash
+node --input-type=module -e "
+import { makeServer } from './dist/rpc/client.js';
+import { discoverAll } from './dist/registry/discover.js';
+import { decodeManifestKey, describeScVal } from './dist/rpc/keys.js';
+const server = makeServer(process.env.LK_RPC_URL);
+const entries = await discoverAll(server, process.env.LK_REGISTRY_ID);
+for (const e of entries) {
+  console.log(e.contract, e.keysXdr.map((k) => describeScVal(decodeManifestKey(k))));
+}
+"
+```
+
+Expected: the escrow prints exactly
+`[ 'LedgerKeyContractInstance', 'Vec[Symbol(Balance)]', 'Vec[Symbol(Milestones)]' ]`,
+matching the fixture in `test/discover.test.ts` and the values in core's
+`scripts/init_testnet.sh`. If the fixture and the live chain disagree, the fixture
+is wrong — report it before continuing.
+
+This step commits nothing. It is a gate.
+
+- [ ] **Step 7: Commit implementation and test separately**
 
 ```bash
 git add src/registry/discover.ts
