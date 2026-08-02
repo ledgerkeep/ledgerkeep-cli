@@ -1,0 +1,8 @@
+dist
+node_modules
+package-lock.json
+
+# Prose, not code. Prettier reflows markdown in ways that churn the spec and plan
+# for no benefit, and the plan is read by line during execution.
+docs
+.superpowers

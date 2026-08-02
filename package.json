@@ -4,10 +4,16 @@
   "description": "Off-chain keeper for LedgerKeep. Scan and extend Soroban contract TTL.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22" },
-  "bin": { "lkeep": "./dist/index.js" },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "lkeep": "./dist/index.js"
+  },
   "main": "./dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",

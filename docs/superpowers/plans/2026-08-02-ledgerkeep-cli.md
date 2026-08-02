@@ -92,7 +92,10 @@ Stated once here so the implementer does not "correct" them back:
    the way vitest's `passWithNoTests` is. Adding a placeholder `src/index.ts` to satisfy
    the gate would be exactly the stub this project forbids. Deferring the workflow by one
    task also means CI's first run is green rather than red.
-8. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+8. `.prettierignore` is not in the brief. Without it `prettier --check .` fails on the
+   spec and plan under `docs/`, which would turn CI red the moment the workflow lands.
+   Prettier governs code here, not prose.
+9. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -102,7 +105,7 @@ Stated once here so the implementer does not "correct" them back:
 ### Task 1: Scaffold the repository
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `.gitignore`, `.prettierrc.json`, `eslint.config.js`, `.env.example`, `README.md`, `LICENSE`, `vitest.config.ts`
+- Create: `package.json`, `tsconfig.json`, `.gitignore`, `.prettierrc.json`, `.prettierignore`, `eslint.config.js`, `.env.example`, `README.md`, `LICENSE`, `vitest.config.ts`
 
 **Interfaces:**
 - Consumes: nothing
@@ -125,8 +128,12 @@ CI's first run lands on a commit where all four checks pass.
   "description": "Off-chain keeper for LedgerKeep. Scan and extend Soroban contract TTL.",
   "license": "Apache-2.0",
   "type": "module",
-  "engines": { "node": ">=22" },
-  "bin": { "lkeep": "./dist/index.js" },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "lkeep": "./dist/index.js"
+  },
   "main": "./dist/index.js",
   "files": ["dist"],
   "scripts": {
@@ -199,6 +206,25 @@ coverage/
   "trailingComma": "all",
   "printWidth": 100
 }
+```
+
+- [ ] **Step 4b: Create `.prettierignore`**
+
+`format:check` runs `prettier --check .`, which otherwise sweeps the spec and plan under
+`docs/` and the scratch files under `.superpowers/`. Prettier reflows markdown prose in
+ways that churn those files for no benefit, and the plan is read by line during
+execution. `package-lock.json` is excluded because npm regenerates it in its own format,
+which would fight `format --write` on every install.
+
+```
+dist
+node_modules
+package-lock.json
+
+# Prose, not code. Prettier reflows markdown in ways that churn the spec and plan
+# for no benefit, and the plan is read by line during execution.
+docs
+.superpowers
 ```
 
 - [ ] **Step 5: Create `eslint.config.js`**
@@ -305,13 +331,16 @@ cp ../Ledgerkeep-core/LICENSE ./LICENSE
 
 ```bash
 npm install
-npm run lint && npm test
+npm run format:check && npm run lint && npm test
 ```
 
-Expected: `lint` exits 0 (it matches no files yet, which is not an error). `test`
-reports "No test files found" and exits 0 — vitest `run` with no tests exits 0 only if
-`passWithNoTests` is set, so if it fails here, add `"passWithNoTests": true` to
-`vitest.config.ts` under `test`.
+Expected: all three clean. `lint` exits 0 (it matches no files yet, which is not an
+error). `test` reports "No test files found" and exits 0 — vitest `run` with no tests
+exits 0 only if `passWithNoTests` is set, so if it fails here, add
+`"passWithNoTests": true` to `vitest.config.ts` under `test`.
+
+`format:check` is part of the gate because CI runs it. If it flags any file, run
+`npm run format` and re-check — do not commit with it failing.
 
 Do **not** run `npm run build` as a gate here. See the note under **Files** above: with
 no `src/` file, `tsc` exits 2 on `TS18003`, which is the correct result for an empty
@@ -324,7 +353,7 @@ Stage by explicit path even here. `git add .` would swallow the README and
 `.env.example` that Step 12 commits separately, leaving it with nothing to stage.
 
 ```bash
-git add package.json package-lock.json tsconfig.json .gitignore .prettierrc.json eslint.config.js vitest.config.ts LICENSE
+git add package.json package-lock.json tsconfig.json .gitignore .prettierrc.json .prettierignore eslint.config.js vitest.config.ts LICENSE
 git commit -m "chore(setup): scaffold package.json, tsconfig, eslint, prettier, gitignore"
 git push origin main
 ```
