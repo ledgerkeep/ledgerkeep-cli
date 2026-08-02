@@ -246,6 +246,15 @@ export default [
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-non-null-assertion": "error",
       "no-console": "error",
+      // Named exports only. Expressed as restricted syntax rather than
+      // import/no-default-export so this needs no extra plugin.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ExportDefaultDeclaration",
+          message: "Named exports only. No default exports.",
+        },
+      ],
     },
   },
   {
