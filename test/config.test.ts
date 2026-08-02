@@ -44,8 +44,9 @@ describe("loadConfig", () => {
   it("does not open the keeper key file", () => {
     // Read-only commands run on machines that hold no key. Loading config must
     // not touch the path, so an unreadable path is not an error here.
-    const config = loadConfig(completeEnv({ LK_KEEPER_KEY: "/nonexistent/nope.key" }));
-    expect(config.keeperKeyPath).toBe("/nonexistent/nope.key");
+    const env = completeEnv({ LK_KEEPER_KEY: "/nonexistent/nope.key" });
+    expect(() => loadConfig(env)).not.toThrow();
+    expect(loadConfig(env).keeperKeyPath).toBe("/nonexistent/nope.key");
   });
 
   it("names the missing variable", () => {
@@ -88,6 +89,21 @@ describe("loadConfig", () => {
 
   it("rejects a malformed RPC URL", () => {
     expect(() => loadConfig(completeEnv({ LK_RPC_URL: "not a url" }))).toThrow(/not a valid URL/);
+  });
+
+  it("rejects a URL whose scheme the RPC client cannot speak", () => {
+    // Parses fine, but nothing downstream could ever use it.
+    expect(() => loadConfig(completeEnv({ LK_RPC_URL: "file:///etc/passwd" }))).toThrow(
+      /must be an http or https URL/,
+    );
+    expect(() => loadConfig(completeEnv({ LK_RPC_URL: "ftp://example.com" }))).toThrow(
+      /must be an http or https URL/,
+    );
+  });
+
+  it("accepts a loopback http URL for a local quickstart", () => {
+    const config = loadConfig(completeEnv({ LK_RPC_URL: "http://localhost:8000/soroban/rpc" }));
+    expect(config.rpcUrl).toBe("http://localhost:8000/soroban/rpc");
   });
 });
 

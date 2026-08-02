@@ -1179,10 +1179,16 @@ function requireContractId(env: NodeJS.ProcessEnv, name: string): string {
 
 function requireUrl(env: NodeJS.ProcessEnv, name: string): string {
   const raw = requireString(env, name);
+  let parsed: URL;
   try {
-    new URL(raw);
+    parsed = new URL(raw);
   } catch {
     throw new ConfigError(`${name} is not a valid URL, got: ${raw}`);
+  }
+  // The only consumer is the RPC client, which speaks http(s). Rejecting other
+  // schemes here gives a clear message instead of an SDK failure further in.
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ConfigError(`${name} must be an http or https URL, got: ${raw}`);
   }
   return raw;
 }
