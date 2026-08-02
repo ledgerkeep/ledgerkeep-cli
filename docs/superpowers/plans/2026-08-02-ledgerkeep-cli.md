@@ -70,6 +70,7 @@ These were confirmed against the installed 16.2.0 package. Do not re-derive them
 | `src/commands/keep.ts` | `lkeep keep` |
 | `test/keys.test.ts` | key round-trip, ScVal rendering |
 | `test/ttl.test.ts` | remaining life, archived detection |
+| `test/config.test.ts` | env validation, and that no error message echoes key file contents |
 | `test/policy.test.ts` | maintenance decision |
 | `test/drift.test.ts` | both drift directions, above-threshold non-drift |
 | `test/discover.test.ts` | decode real manifest fixtures from core |
@@ -1110,6 +1111,7 @@ git push origin main
 
 **Files:**
 - Create: `src/config.ts`
+- Test: `test/config.test.ts`
 
 **Interfaces:**
 - Consumes: nothing
