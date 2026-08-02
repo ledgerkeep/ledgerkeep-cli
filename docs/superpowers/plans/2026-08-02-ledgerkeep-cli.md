@@ -3129,12 +3129,28 @@ export async function runKeep(): Promise<number> {
 ```ts
 #!/usr/bin/env node
 import { Command } from "commander";
+import { StrKey } from "@stellar/stellar-sdk";
 import { ConfigError } from "./config.js";
 import { log } from "./log.js";
 import { runScan } from "./commands/scan.js";
 import { runExtend } from "./commands/extend.js";
 import { runRegistryList } from "./commands/registryList.js";
 import { runKeep } from "./commands/keep.js";
+
+/**
+ * Reject anything that is not a contract id before it reaches key construction.
+ *
+ * `Address.fromString` accepts a `G...` account address and yields a valid-looking
+ * `ScAddress`, so an account id would build a structurally correct ledger key that
+ * simply never resolves. The operator would see an empty or "archived" result
+ * instead of being told they passed the wrong kind of address.
+ */
+function parseContractId(value: string): string {
+  if (!StrKey.isValidContract(value)) {
+    throw new ConfigError(`not a valid contract id (expected C...), got: ${value}`);
+  }
+  return value;
+}
 
 /**
  * Run one command and turn any failure into an exit code.
@@ -3153,7 +3169,7 @@ async function main(): Promise<void> {
   program
     .command("scan")
     .description("Read a contract's TTL. Exits 2 if any key is low or archived.")
-    .argument("<contractId>", "contract to scan (C...)")
+    .argument("<contractId>", "contract to scan (C...)", parseContractId)
     .action(async (contractId: string) => {
       process.exitCode = await runScan(contractId);
     });
@@ -3161,7 +3177,7 @@ async function main(): Promise<void> {
   program
     .command("extend")
     .description("Extend a contract's TTL. Calls extend_all unless --footprint is given.")
-    .argument("<contractId>", "contract to extend (C...)")
+    .argument("<contractId>", "contract to extend (C...)", parseContractId)
     .option("--footprint", "use a raw extendFootprintTtl instead of extend_all", false)
     .option(
       "--key <xdr>",
