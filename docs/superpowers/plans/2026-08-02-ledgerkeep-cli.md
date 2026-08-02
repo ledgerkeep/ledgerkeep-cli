@@ -95,7 +95,11 @@ Stated once here so the implementer does not "correct" them back:
 8. `.prettierignore` is not in the brief. Without it `prettier --check .` fails on the
    spec and plan under `docs/`, which would turn CI red the moment the workflow lands.
    Prettier governs code here, not prose.
-9. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+9. Task 2 does not define a `NetworkConfig` interface. An earlier draft of this plan
+   did, but nothing ever consumed it — Task 5's `Config` carries `rpcUrl` and
+   `networkPassphrase` along with everything else, and every caller takes that. A type
+   no caller uses is the speculative code this project forbids.
+10. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -387,7 +391,7 @@ untracked `.superpowers/`.
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `makeServer(rpcUrl: string): rpc.Server`, `NetworkConfig` type
+- Produces: `makeServer(rpcUrl: string): rpc.Server`
 
 - [ ] **Step 1: Record the SDK verification result**
 
@@ -419,17 +423,17 @@ If any line differs, **stop and report it** rather than working around it.
 ```ts
 import { rpc } from "@stellar/stellar-sdk";
 
-/** The network a command talks to. */
-export interface NetworkConfig {
-  rpcUrl: string;
-  networkPassphrase: string;
-}
+/**
+ * Hostnames `URL` reports for the loopback interface. `URL` keeps the brackets
+ * around an IPv6 host, so `[::1]` is the literal value to match — not `::1`.
+ */
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 /**
  * Build an RPC server client.
  *
- * `allowHttp` is enabled only for loopback URLs so a local quickstart container
- * works without weakening anything pointed at a real network.
+ * `allowHttp` is enabled only for plaintext loopback URLs, so a local quickstart
+ * container works without weakening anything pointed at a real network.
  */
 export function makeServer(rpcUrl: string): rpc.Server {
   let parsed: URL;
@@ -438,8 +442,8 @@ export function makeServer(rpcUrl: string): rpc.Server {
   } catch {
     throw new Error(`LK_RPC_URL is not a valid URL: ${rpcUrl}`);
   }
-  const isLoopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
-  return new rpc.Server(rpcUrl, { allowHttp: isLoopback });
+  const allowHttp = parsed.protocol === "http:" && LOOPBACK_HOSTNAMES.has(parsed.hostname);
+  return new rpc.Server(rpcUrl, { allowHttp });
 }
 ```
 
