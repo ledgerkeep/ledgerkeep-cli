@@ -71,6 +71,7 @@ These were confirmed against the installed 16.2.0 package. Do not re-derive them
 | `test/keys.test.ts` | key round-trip, ScVal rendering |
 | `test/ttl.test.ts` | remaining life, archived detection |
 | `test/config.test.ts` | env validation, and that no error message echoes key file contents |
+| `test/log.test.ts` | stream routing, bigint and Error handling, Keypair redaction, circular safety |
 | `test/policy.test.ts` | maintenance decision |
 | `test/drift.test.ts` | both drift directions, above-threshold non-drift |
 | `test/discover.test.ts` | decode real manifest fixtures from core |
@@ -100,7 +101,17 @@ Stated once here so the implementer does not "correct" them back:
    did, but nothing ever consumed it — Task 5's `Config` carries `rpcUrl` and
    `networkPassphrase` along with everything else, and every caller takes that. A type
    no caller uses is the speculative code this project forbids.
-10. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+10. `src/log.ts` carries no `/* eslint-disable no-console */`. `eslint.config.js`
+   already turns the rule off for exactly this file, so the inline directive is
+   redundant and eslint reports it as an unused-directive warning on every run. A
+   permanently-warning build teaches people to ignore warnings.
+11. `serialize` reduces a `Keypair` to its public key. Verified, not assumed:
+   `JSON.stringify(Keypair.random())` emits `_secretSeed` and `_secretKey` as byte
+   arrays — the complete secret in recoverable form. An earlier draft of this plan
+   claimed a `Keypair` "would serialize to `{}` rather than a secret". That was
+   false, and it is exactly the kind of comment that makes a later maintainer
+   comfortable logging one.
+12. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -1283,7 +1294,7 @@ onward logs. This is the only module allowed to write to stdout or stderr.
 - [ ] **Step 1: Write `src/log.ts`**
 
 ```ts
-/* eslint-disable no-console */
+import { Keypair } from "@stellar/stellar-sdk";
 
 /** Extra structured fields attached to a log line. */
 export type LogFields = Record<string, unknown>;
@@ -1296,19 +1307,40 @@ type Level = "info" | "warn" | "error";
  * `bigint` is stringified because `JSON.stringify` throws on it, and ledger math
  * elsewhere may hand us one. Errors are reduced to name and message; a stack
  * would make the output unreadable in a daemon tail.
+ *
+ * A `Keypair` is reduced to its public key. This is not defensive decoration:
+ * `JSON.stringify` on a `Keypair` emits `_secretSeed` and `_secretKey` as plain
+ * byte arrays, which is the whole secret in recoverable form. No call site should
+ * pass one, but the cost of being wrong once is a seed written to stdout.
+ *
+ * `JSON.stringify` can still throw on a circular object after this normalization.
+ * A logging failure must never take down a running daemon, so the final stringify
+ * is wrapped and falls back to a line reporting the failure.
  */
 function serialize(level: Level, msg: string, fields: LogFields): string {
   const record: LogFields = { ts: new Date().toISOString(), level, msg };
   for (const [key, value] of Object.entries(fields)) {
     if (typeof value === "bigint") {
       record[key] = value.toString();
+    } else if (value instanceof Keypair) {
+      record[key] = value.publicKey();
     } else if (value instanceof Error) {
       record[key] = `${value.name}: ${value.message}`;
     } else {
       record[key] = value;
     }
   }
-  return JSON.stringify(record);
+  try {
+    return JSON.stringify(record);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "unknown error";
+    return JSON.stringify({
+      ts: record.ts,
+      level,
+      msg,
+      logError: `failed to serialize fields: ${reason}`,
+    });
+  }
 }
 
 function emit(level: Level, msg: string, fields: LogFields = {}): void {
@@ -1324,9 +1356,8 @@ function emit(level: Level, msg: string, fields: LogFields = {}): void {
  * The only writer to stdout and stderr in this program.
  *
  * `info` marks actions, `warn` marks drift and low TTL, `error` marks RPC and
- * signing failures. Nothing here can reach a `Keypair`: callers pass plain
- * fields, and a `Keypair` would serialize to `{}` rather than a secret, but no
- * call site should pass one regardless.
+ * signing failures. Callers pass plain fields; a `Keypair` that reaches here is
+ * reduced to its public key by `serialize`.
  */
 export const log = {
   info: (msg: string, fields?: LogFields): void => emit("info", msg, fields),
