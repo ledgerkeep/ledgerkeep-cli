@@ -165,6 +165,14 @@ Stated once here so the implementer does not "correct" them back:
    healthy contract — the precise false positive the threshold gate exists to prevent.
    Task 11's policy test already covers this boundary ("treats exactly at threshold as
    healthy"); drift now does too.
+19. Task 16's `runLoop` leaked an abort listener per tick. The original wait registered
+   `signal.addEventListener("abort", ..., { once: true })` on every iteration, but
+   `{ once: true }` only removes the listener if the event fires — and on a healthy
+   daemon it never does, because each tick ends by timing out instead. I measured it:
+   200 ticks retained 200 listeners, growing without bound in the one component
+   designed to run indefinitely. At the default 60s interval that is 1440 retained
+   closures per day, each pinning a timer and a resolve. The wait now removes the
+   listener explicitly on the timeout path, which measures 0 retained after 200 ticks.
 
 ---
 
@@ -3293,16 +3301,24 @@ export async function runLoop(ctx: KeeperContext, signal: AbortSignal): Promise<
     await runTick(ctx);
     if (signal.aborted) break;
 
+    // The abort listener has to come off on the timeout path too. `{ once: true }`
+    // removes it only if the event actually fires, and in the common case it never
+    // does — the tick simply times out. Without the explicit removal, every
+    // completed tick leaves a listener attached for the life of the process:
+    // measured at 200 retained listeners after 200 ticks, against 0 with it. This
+    // is the one component built to run forever, so it is the one place where
+    // unbounded growth cannot be shrugged off.
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ctx.config.scanIntervalMs);
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true },
-      );
+      let timer: ReturnType<typeof setTimeout>;
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ctx.config.scanIntervalMs);
+      signal.addEventListener("abort", onAbort, { once: true });
     });
   }
   log.info("daemon stopped", {});
