@@ -78,6 +78,16 @@ describe("ttlDrift", () => {
     expect(ttlDrift(before, after, 100_000)).toEqual([]);
   });
 
+  it("does not report a key sitting exactly at threshold that did not move", () => {
+    // extend_ttl writes only when remaining life is strictly below threshold, so
+    // a key exactly at it is supposed to stay put. Without this case, changing
+    // the gate from `>=` to `>` passes every other test in this file.
+    const key = symbolKey("Balance");
+    const before = [reading(key, "Vec[Symbol(Balance)]", 100_000)];
+    const after = [reading(key, "Vec[Symbol(Balance)]", 100_000)];
+    expect(ttlDrift(before, after, 100_000)).toEqual([]);
+  });
+
   it("reports a key that was below threshold and did not move", () => {
     const key = symbolKey("Balance");
     const before = [reading(key, "Vec[Symbol(Balance)]", 50_000)];
