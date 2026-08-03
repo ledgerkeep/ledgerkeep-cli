@@ -157,6 +157,14 @@ Stated once here so the implementer does not "correct" them back:
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
+18. Task 12 gained a twelfth test, "does not report a key sitting exactly at threshold
+   that did not move". Mutation testing found that changing `ttlDrift`'s gate from
+   `>= threshold` to `> threshold` passed all eleven original tests. Soroban's
+   `extend_ttl` writes only when remaining life is *strictly below* threshold, so a key
+   exactly at it is supposed to stay put; under `>` the daemon would report drift on a
+   healthy contract — the precise false positive the threshold gate exists to prevent.
+   Task 11's policy test already covers this boundary ("treats exactly at threshold as
+   healthy"); drift now does too.
 
 ---
 
@@ -2616,6 +2624,16 @@ describe("ttlDrift", () => {
     expect(ttlDrift(before, after, 100_000)).toEqual([]);
   });
 
+  it("does not report a key sitting exactly at threshold that did not move", () => {
+    // extend_ttl writes only when remaining life is strictly below threshold, so
+    // a key exactly at it is supposed to stay put. Without this case, changing
+    // the gate from `>=` to `>` passes every other test in this file.
+    const key = symbolKey("Balance");
+    const before = [reading(key, "Vec[Symbol(Balance)]", 100_000)];
+    const after = [reading(key, "Vec[Symbol(Balance)]", 100_000)];
+    expect(ttlDrift(before, after, 100_000)).toEqual([]);
+  });
+
   it("reports a key that was below threshold and did not move", () => {
     const key = symbolKey("Balance");
     const before = [reading(key, "Vec[Symbol(Balance)]", 50_000)];
@@ -2779,7 +2797,7 @@ export function ttlDrift(
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/drift.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Run everything**
 
