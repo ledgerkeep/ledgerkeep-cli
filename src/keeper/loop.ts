@@ -58,7 +58,8 @@ export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry)
       log.warn("manifest drift", {
         contract,
         kind: finding.kind,
-        key: finding.description,
+        keyId: finding.keyId,
+        description: finding.description,
         detail: finding.detail,
       });
     }
@@ -111,7 +112,8 @@ export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry)
     log.warn("manifest drift", {
       contract,
       kind: finding.kind,
-      key: finding.description,
+      keyId: finding.keyId,
+      description: finding.description,
       detail: finding.detail,
     });
   }
