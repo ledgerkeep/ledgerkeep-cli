@@ -31,7 +31,7 @@ function requireString(env: NodeJS.ProcessEnv, name: string): string {
 function requirePositiveInt(env: NodeJS.ProcessEnv, name: string): number {
   const raw = requireString(env, name);
   if (!/^\d+$/.test(raw)) {
-    throw new ConfigError(`${name} must be a whole number of ledgers, got: ${raw}`);
+    throw new ConfigError(`${name} must be a whole number, got: ${raw}`);
   }
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value <= 0) {
