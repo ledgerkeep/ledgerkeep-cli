@@ -3525,8 +3525,9 @@ Expected: one JSON line at level `error` naming `LK_RPC_URL`, and `exit=1`.
 
 - [ ] **Step 4: Run everything**
 
-Run: `npm run build && npm run lint && npm test`
-Expected: all clean, 56 tests.
+Run: `npm run build && npm run lint && npm run format:check && npm test`
+Expected: all clean, 86 tests across 8 files. This task adds no tests, so that count
+must not change.
 
 - [ ] **Step 5: Commit**
 
