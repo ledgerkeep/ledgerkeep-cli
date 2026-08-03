@@ -184,6 +184,19 @@ Stated once here so the implementer does not "correct" them back:
    difference between "stopped cleanly" and "kept spending after I hit ctrl-c". The
    misordering fooled me during verification, which is the evidence it would fool an
    operator reading the same lines.
+21. Task 18's README told operators to run `stellar keys show alice`. That subcommand
+   does not exist. Verified against the stellar-cli cookbook and against
+   FULL_HELP_DOCS.md on main, which lists a `secret` subcommand ("Output an identity's
+   secret key") and no `show` subcommand at all. The README now says
+   `stellar keys secret alice`. Every operator following the setup instructions
+   verbatim would have hit a command-not-found at the one step that produces the
+   keeper key.
+22. Task 18's README example contract id `CBQHNAXSI55GX2GN6D67GK7BHVPSLJUGZQEU7WJ5LKR5PNUCGLIMAO4K`
+   is a structurally valid strkey that is not deployed on testnet. Scanning it returns
+   `status: "archived"`, `liveUntilLedgerSeq: null` — a copy-pasted example that makes
+   the tool look like it found a dying contract when it found nothing at all. Replaced
+   with the real deployed escrow. This is the third fictional-id defect in this plan
+   (see 16), and the reason to only ever put ids in docs that were read off chain.
 
 ---
 
@@ -3609,7 +3622,7 @@ Copy `.env.example` and fill it in.
 no secret is ever logged. Export one from `stellar-cli` and restrict it:
 
 ```bash
-stellar keys show alice > ~/.ledgerkeep/keeper.key
+stellar keys secret alice > ~/.ledgerkeep/keeper.key
 chmod 600 ~/.ledgerkeep/keeper.key
 ```
 
@@ -3624,7 +3637,7 @@ its manifest. Exits 0 when all keys are ok, 2 when any is low or archived, so it
 works as a shell check.
 
 ```bash
-lkeep scan CBQHNAXSI55GX2GN6D67GK7BHVPSLJUGZQEU7WJ5LKR5PNUCGLIMAO4K
+lkeep scan CASBZNG6KRKZYRQ22TVOGEYSRDIV7QSCJDFIMSII5LA7XXKIUXOX6NZ6
 ```
 
 ### `lkeep extend <contractId>`
@@ -3634,8 +3647,8 @@ raw `extendFootprintTtl`, `--key <xdr>` adds ledger keys to it (repeatable, hex 
 base64), and `--durability` selects persistent or temporary.
 
 ```bash
-lkeep extend CBQH...AO4K
-lkeep extend CBQH...AO4K --footprint --key 00000014
+lkeep extend CASBZNG6...6NZ6
+lkeep extend CASBZNG6...6NZ6 --footprint --key 00000014
 ```
 
 ### `lkeep registry-list`
@@ -3733,10 +3746,11 @@ git push origin main
 - [ ] `npm run build` clean
 - [ ] `npm run lint` clean
 - [ ] `npm run format:check` clean
-- [ ] `npm test` green — 56 tests across 6 files
+- [ ] `npm test` green — 86 tests across 8 files
 - [ ] `git status --porcelain` empty
-- [ ] `git log --oneline` shows 25 implementation commits, all pushed, on top of the
-      two doc commits (design spec, this plan) that precede Task 1
+- [ ] `git log --oneline` shows every task's commits, all pushed, on top of the two
+      doc commits (design spec, this plan) that precede Task 1. Do not assert an exact
+      count: plan-fix and follow-up commits made during execution are expected.
 - [ ] No commit message contains `Co-Authored-By` or a generated-with footer:
       `git log --format=%B | grep -ci "co-authored-by\|generated with"` prints `0`
 - [ ] No secret appears anywhere: `git grep -nE "^S[A-Z2-7]{55}$"` finds nothing
