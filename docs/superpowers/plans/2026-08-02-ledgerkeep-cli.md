@@ -2327,11 +2327,18 @@ Pure. No I/O, no SDK calls beyond types.
 ```ts
 import { describe, expect, it } from "vitest";
 import type { TtlReading } from "../src/rpc/ttl.js";
+import { instanceLedgerKey } from "../src/rpc/keys.js";
 import { decideMaintenance, effectiveThreshold } from "../src/keeper/policy.js";
+
+/** The long_escrow example as deployed to testnet. Used only to build a real key. */
+const ESCROW = "CASBZNG6KRKZYRQ22TVOGEYSRDIV7QSCJDFIMSII5LA7XXKIUXOX6NZ6";
 
 function reading(description: string, remaining: number, threshold = 100_000): TtlReading {
   return {
-    key: undefined as unknown as TtlReading["key"],
+    // A real key rather than a cast placeholder. `undefined as unknown as
+    // xdr.LedgerKey` lies to the type checker, and the test would crash oddly
+    // rather than fail clearly if the policy ever read this field.
+    key: instanceLedgerKey(ESCROW),
     keyId: `id:${description}`,
     description,
     durability: "persistent",
