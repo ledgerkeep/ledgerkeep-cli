@@ -103,7 +103,14 @@ export async function extendViaFootprint(params: FootprintParams): Promise<Submi
 
   const final = await server.pollTransaction(sent.hash);
   if (final.status !== "SUCCESS") {
-    throw new Error(`transaction ${sent.hash} ended ${final.status}`);
+    // JSON.stringify on resultXdr would emit js-xdr internals, not a code.
+    const resultCode =
+      final.status === "FAILED" ? final.resultXdr.result().switch().name : undefined;
+    throw new Error(
+      resultCode
+        ? `transaction ${sent.hash} ended ${final.status} (${resultCode})`
+        : `transaction ${sent.hash} ended ${final.status}`,
+    );
   }
 
   return { hash: sent.hash, minResourceFee: sim.minResourceFee, status: final.status };
