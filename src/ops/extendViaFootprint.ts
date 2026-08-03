@@ -30,8 +30,9 @@ export interface FootprintParams {
  * Build the unsigned Path B transaction.
  *
  * The keys go in the **read-only** footprint: extending time-to-live does not
- * modify entry data. `extendTo` is an absolute target in ledgers from the current
- * one, not a delta.
+ * modify entry data. `extendTo` is the minimum TTL, counted in ledgers past the
+ * current ledger, that every key in the read-only footprint will have after the
+ * operation; entries already above it are skipped.
  */
 export function buildFootprintTx(
   account: Account,
@@ -67,6 +68,15 @@ export async function extendViaFootprint(params: FootprintParams): Promise<Submi
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`simulation failed: ${sim.error}`);
   }
+  // isSimulationError is not enough: a restore-required simulation is a
+  // *success* response with an extra `restorePreamble` field, not an error.
+  // Submitting it anyway would sign and pay for a transaction the RPC has
+  // already told us cannot succeed as written, against archived entries.
+  if (rpc.Api.isSimulationRestore(sim)) {
+    throw new Error(
+      `${keys.length} entr${keys.length === 1 ? "y" : "ies"} require restoring before their TTL can be extended`,
+    );
+  }
 
   log.info("simulated footprint extension", {
     keys: keys.length,
@@ -78,8 +88,17 @@ export async function extendViaFootprint(params: FootprintParams): Promise<Submi
   prepared.sign(keypair);
 
   const sent = await server.sendTransaction(prepared);
-  if (sent.status === "ERROR") {
-    throw new Error(`submission rejected: ${JSON.stringify(sent.errorResult ?? sent.status)}`);
+  if (sent.status !== "PENDING") {
+    // Only PENDING means the network actually queued the transaction. On
+    // TRY_AGAIN_LATER or DUPLICATE, sendTransaction never queued it, so
+    // polling would burn the full poll budget against a hash the network
+    // does not have and misreport back-pressure as a transaction failure.
+    const resultCode = sent.errorResult?.result().switch().name;
+    throw new Error(
+      resultCode
+        ? `submission rejected: ${sent.status} (${resultCode})`
+        : `submission rejected: ${sent.status}`,
+    );
   }
 
   const final = await server.pollTransaction(sent.hash);
