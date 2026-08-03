@@ -173,6 +173,17 @@ Stated once here so the implementer does not "correct" them back:
    designed to run indefinitely. At the default 60s interval that is 1440 retained
    closures per day, each pinning a timer and a resolve. The wait now removes the
    listener explicitly on the timeout path, which measures 0 retained after 200 ticks.
+20. Task 16's `runTick` logs "tick start" before registry discovery rather than after,
+   and reports the contract count in a new "registry discovered" line. Found by running
+   the daemon and reading its log, not by review. Discovery is a 2-3 second network
+   round trip, and logging "tick start" only once it returned left the tick's opening
+   seconds silent. A SIGINT landing in that window printed "stopping" before "tick
+   start", which reads as though the daemon began a fresh tick after being told to
+   stop. It does not — a controlled abort test aborting mid-wait exits without starting
+   another tick, twice — but the log said otherwise. On a funded keeper that is the
+   difference between "stopped cleanly" and "kept spending after I hit ctrl-c". The
+   misordering fooled me during verification, which is the evidence it would fool an
+   operator reading the same lines.
 
 ---
 
@@ -3264,6 +3275,14 @@ export async function maintainContract(
 
 /** One pass over every registered contract. */
 export async function runTick(ctx: KeeperContext): Promise<void> {
+  // Logged before discovery rather than after it. Discovery is a network round
+  // trip that takes seconds, so a "tick start" printed only once it returns leaves
+  // the tick's opening seconds silent. That gap is actively misleading: a SIGINT
+  // arriving mid-discovery prints "stopping" before "tick start", which reads as
+  // though the daemon began a whole new tick after being told to stop. It does not
+  // — but an operator watching a funded keeper cannot tell that from the log.
+  log.info("tick start", {});
+
   let entries: ManifestEntry[];
   try {
     entries = await discoverAll(ctx.server, ctx.config.registryId);
@@ -3272,7 +3291,7 @@ export async function runTick(ctx: KeeperContext): Promise<void> {
     return;
   }
 
-  log.info("tick start", { contracts: entries.length });
+  log.info("registry discovered", { contracts: entries.length });
 
   for (const entry of entries) {
     try {
