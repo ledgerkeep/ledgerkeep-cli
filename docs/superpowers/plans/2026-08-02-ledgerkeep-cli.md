@@ -116,7 +116,30 @@ Stated once here so the implementer does not "correct" them back:
    claimed a `Keypair` "would serialize to `{}` rather than a secret". That was
    false, and it is exactly the kind of comment that makes a later maintainer
    comfortable logging one.
-12. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+12. Path B rejects a restore-required simulation; Path A does not. `isSimulationError`
+   is false for one — `restorePreamble` rides on a *success* response — and
+   `assembleTransaction` gates on `isSimulationSuccess`, which accepts it. Path B would
+   therefore have signed, paid for, and submitted a transaction the RPC had already
+   said could not succeed, and the operator would have seen only `ended FAILED` with the
+   server's hint discarded. For a TTL keeper an archived entry is the likeliest real
+   failure, so it must be named. Path A takes no such guard on purpose: Protocol 23
+   restores archived persistent entries automatically inside an InvokeHostFunctionOp
+   footprint, which is what `extend_all` is, and the spec already relies on that ("the
+   next Path A run restores it as a side effect"). ExtendFootprintTTLOp restores nothing.
+13. Only `PENDING` proceeds to `pollTransaction`. An earlier draft rejected `ERROR`
+   alone, letting `TRY_AGAIN_LATER` and `DUPLICATE` through — neither was ever queued,
+   so the poll burned its full ~30s budget against a hash the network did not have and
+   then reported `ended NOT_FOUND`, misattributing back-pressure to a failed
+   transaction. The rejection message also decodes `errorResult.result().switch().name`
+   rather than `JSON.stringify`-ing the XDR struct, which emits js-xdr `_maxDepth` and
+   `_armType` plumbing with the result code buried inside.
+14. `extendTo` is relative, not absolute. An earlier draft's comment called it "an
+   absolute target in ledgers from the current one, not a delta". The SDK is explicit:
+   "TTL is the number of ledgers from the current ledger (exclusive) until the last
+   ledger the entry is still considered alive". A caller trusting the old wording would
+   pass `currentLedger + N` and overshoot the maximum TTL. This is the module's only
+   numeric cross-task contract, so a wrong comment on it is worse than none.
+15. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -1466,8 +1489,9 @@ export interface FootprintParams {
  * Build the unsigned Path B transaction.
  *
  * The keys go in the **read-only** footprint: extending time-to-live does not
- * modify entry data. `extendTo` is an absolute target in ledgers from the current
- * one, not a delta.
+ * modify entry data. `extendTo` is the minimum TTL, counted in ledgers past the
+ * current ledger, that every key in the read-only footprint will have after the
+ * operation; entries already above it are skipped.
  */
 export function buildFootprintTx(
   account: Account,
@@ -1503,6 +1527,15 @@ export async function extendViaFootprint(params: FootprintParams): Promise<Submi
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`simulation failed: ${sim.error}`);
   }
+  // isSimulationError is not enough: a restore-required simulation is a
+  // *success* response with an extra `restorePreamble` field, not an error.
+  // Submitting it anyway would sign and pay for a transaction the RPC has
+  // already told us cannot succeed as written, against archived entries.
+  if (rpc.Api.isSimulationRestore(sim)) {
+    throw new Error(
+      `${keys.length} entr${keys.length === 1 ? "y" : "ies"} require restoring before their TTL can be extended`,
+    );
+  }
 
   log.info("simulated footprint extension", {
     keys: keys.length,
@@ -1514,8 +1547,18 @@ export async function extendViaFootprint(params: FootprintParams): Promise<Submi
   prepared.sign(keypair);
 
   const sent = await server.sendTransaction(prepared);
-  if (sent.status === "ERROR") {
-    throw new Error(`submission rejected: ${JSON.stringify(sent.errorResult ?? sent.status)}`);
+  if (sent.status !== "PENDING") {
+    // Only PENDING means the network actually queued the transaction. On
+    // TRY_AGAIN_LATER or DUPLICATE, sendTransaction never queued it, so
+    // polling would burn the full poll budget against a hash the network
+    // does not have and misreport back-pressure as a transaction failure.
+    // JSON.stringify on errorResult would emit js-xdr internals, not a code.
+    const resultCode = sent.errorResult?.result().switch().name;
+    throw new Error(
+      resultCode
+        ? `submission rejected: ${sent.status} (${resultCode})`
+        : `submission rejected: ${sent.status}`,
+    );
   }
 
   const final = await server.pollTransaction(sent.hash);
@@ -1683,6 +1726,10 @@ export async function extendViaContract(
   if (rpc.Api.isSimulationError(sim)) {
     throw new Error(`simulation of extend_all failed: ${sim.error}`);
   }
+  // Deliberately no `isSimulationRestore` guard, unlike Path B. Since Protocol
+  // 23 an archived persistent entry is restored automatically when it appears
+  // in the footprint of an InvokeHostFunctionOp, which is what this is. Path B
+  // needs the guard because ExtendFootprintTTLOp cannot restore anything.
 
   log.info("simulated extend_all", {
     contract: contractId,
@@ -1693,8 +1740,18 @@ export async function extendViaContract(
   prepared.sign(keypair);
 
   const sent = await server.sendTransaction(prepared);
-  if (sent.status === "ERROR") {
-    throw new Error(`submission rejected: ${JSON.stringify(sent.errorResult ?? sent.status)}`);
+  if (sent.status !== "PENDING") {
+    // Only PENDING means the network actually queued the transaction. On
+    // TRY_AGAIN_LATER or DUPLICATE, sendTransaction never queued it, so
+    // polling would burn the full poll budget against a hash the network
+    // does not have and misreport back-pressure as a transaction failure.
+    // JSON.stringify on errorResult would emit js-xdr internals, not a code.
+    const resultCode = sent.errorResult?.result().switch().name;
+    throw new Error(
+      resultCode
+        ? `submission rejected: ${sent.status} (${resultCode})`
+        : `submission rejected: ${sent.status}`,
+    );
   }
 
   const final = await server.pollTransaction(sent.hash);
