@@ -139,7 +139,21 @@ Stated once here so the implementer does not "correct" them back:
    ledger the entry is still considered alive". A caller trusting the old wording would
    pass `currentLedger + N` and overshoot the maximum TTL. This is the module's only
    numeric cross-task contract, so a wrong comment on it is worse than none.
-15. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
+15. `discoverAll` unwraps a `contract.Ok` rather than checking `Array.isArray`. The
+   registry's `page` returns a Rust `Result`, and the SDK decodes it into its own
+   `Ok`/`Err` wrapper. An earlier draft checked the raw value with `Array.isArray` and
+   would have thrown "did not return a list" on every real page — the code would have
+   passed every unit test and failed against the only chain it will ever run on. This
+   is exactly what the Task 10 smoke check exists to catch, and it caught it. Related:
+   `count` returns a plain number, so the two calls are not symmetric, and a
+   non-numeric count is now rejected rather than silently producing zero contracts —
+   a keeper that discovers nothing maintains nothing while still looking healthy.
+16. The Task 10 fixture's contract id was fictional. The key *bytes* were real
+   (verified against core in Task 3), but the id `CA3D5KRY…` matched nothing on chain,
+   so the fixture only looked like the deployed escrow. It is now the real
+   `CASBZNG6KRKZYRQ22TVOGEYSRDIV7QSCJDFIMSII5LA7XXKIUXOX6NZ6`, and the smoke check
+   compares against the ids in core's README rather than an unset `LK_LONG_ESCROW_ID`.
+17. The brief's commits 4 and 5 are one commit. Commit 4 was "pin the SDK and verify the
    import surface", which produces no file of its own — the pin lives in `package.json`
    from Task 1 and the verification is recorded above and re-run in Task 2. That makes
    25 implementation commits rather than 26. An empty commit would be worse.
@@ -1912,25 +1926,45 @@ git push origin main
   - `interface ManifestEntry { contract: string; keysXdr: Buffer[]; threshold: number; extendTo: number; registered: number; updated: number }`
   - `PAGE_LIMIT = 50`
   - `decodeEntry(raw: unknown): ManifestEntry`
+  - `unwrapPage(raw: unknown, start: number): unknown[]`
   - `discoverAll(server: rpc.Server, registryId: string): Promise<ManifestEntry[]>`
 
 The registry's `page` caps `limit` at 50 and errors `LimitTooLarge` above it, so
 `PAGE_LIMIT` is 50 exactly and paging stops when a page returns short.
 
-`decodeEntry` is separate from `discoverAll` so the fixture test runs with no network.
+`decodeEntry` and `unwrapPage` are separate from `discoverAll` so the fixture tests
+run with no network.
+
+**Read this before writing `discoverAll`.** These were confirmed against the live
+testnet registry `CB7K56KG3KHC43FROV534M55FMVGBW24NUFQSXSRMH7OS54242GFYMGN`, not
+inferred from the Rust source:
+
+| Call | What actually comes back |
+|---|---|
+| `count` | a plain `number` — `2` |
+| `page(start=0, limit=50)` | `Ok([...])`, the SDK's `contract.Ok` wrapper around the list — **not** a bare array |
+| `page(start=999, limit=50)` | `Ok([])`, so the short-page break still works |
+| `page(limit=51)` | throws inside simulation: `HostError: Error(Contract, #105)`. An oversized limit never arrives as an `Err` value |
+
+`contract.Ok` and `contract.Err` are exported from `@stellar/stellar-sdk` and carry
+`unwrap()`, `unwrapErr()`, `isOk()`, `isErr()`. An earlier draft of this plan checked
+`Array.isArray(page)` directly and would have rejected every real page.
 
 - [ ] **Step 1: Write the failing test**
 
 The fixture is a real `RegistryEntry` as `scValToNative` produces it: snake_case
 fields from the Rust `#[contracttype]`, `Address` as a string, `Bytes` as a Buffer.
-The three key values are the escrow's deployed manifest.
+The contract id and the three key values are the escrow's live deployed manifest,
+read off testnet and pasted here.
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { decodeEntry } from "../src/registry/discover.js";
+import { contract as contractSpec } from "@stellar/stellar-sdk";
+import { decodeEntry, unwrapPage } from "../src/registry/discover.js";
 import { describeScVal, decodeManifestKey, manifestLedgerKeys } from "../src/rpc/keys.js";
 
-const ESCROW = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+/** The long_escrow example, as deployed to testnet by core's `init_testnet.sh`. */
+const ESCROW = "CASBZNG6KRKZYRQ22TVOGEYSRDIV7QSCJDFIMSII5LA7XXKIUXOX6NZ6";
 
 const INSTANCE_HEX = "00000014";
 const BALANCE_HEX = "0000001000000001000000010000000f0000000742616c616e636500";
@@ -1997,6 +2031,29 @@ describe("decodeEntry", () => {
     expect(() => decodeEntry("nope")).toThrow(/registry entry/i);
   });
 });
+
+describe("unwrapPage", () => {
+  it("unwraps the Ok the registry actually returns", () => {
+    // The live registry returns a Rust Result, which the SDK hands back as Ok,
+    // not as a bare array. Checking Array.isArray on the raw value rejected
+    // every real page.
+    const entries = [fixture()];
+    expect(unwrapPage(new contractSpec.Ok(entries), 0)).toEqual(entries);
+  });
+
+  it("treats an exhausted page as empty rather than an error", () => {
+    expect(unwrapPage(new contractSpec.Ok([]), 999)).toEqual([]);
+  });
+
+  it("throws on an Err, naming the start offset", () => {
+    expect(() => unwrapPage(new contractSpec.Err("LimitTooLarge"), 50)).toThrow(/start=50/);
+  });
+
+  it("throws when the payload is not a list", () => {
+    expect(() => unwrapPage(new contractSpec.Ok("nope"), 0)).toThrow(/did not return a list/);
+    expect(() => unwrapPage(42, 0)).toThrow(/did not return a list/);
+  });
+});
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -2007,7 +2064,7 @@ Expected: FAIL — cannot resolve `../src/registry/discover.js`.
 - [ ] **Step 3: Write `src/registry/discover.ts`**
 
 ```ts
-import { rpc } from "@stellar/stellar-sdk";
+import { contract as contractSpec, rpc } from "@stellar/stellar-sdk";
 
 /** One contract's published maintenance manifest, decoded. */
 export interface ManifestEntry {
@@ -2075,6 +2132,29 @@ export function decodeEntry(raw: unknown): ManifestEntry {
 }
 
 /**
+ * Unwrap one page of registry entries.
+ *
+ * The registry's `page` returns a Rust `Result`, and the SDK decodes that into
+ * its own `Ok`/`Err` wrapper rather than a bare list. Verified against the
+ * deployed testnet registry, not assumed: a good page arrives as `Ok([...])`,
+ * a `start` past the end arrives as `Ok([])`, and a `limit` above 50 fails
+ * inside simulation with `Error(Contract, #105)` — so an oversized limit is a
+ * thrown error from `queryContract`, never an `Err` value here.
+ *
+ * `count`, by contrast, returns a plain number. The two are not symmetric.
+ */
+export function unwrapPage(raw: unknown, start: number): unknown[] {
+  if (raw instanceof contractSpec.Err) {
+    throw new Error(`registry page at start=${start} returned an error: ${String(raw.unwrapErr())}`);
+  }
+  const value = raw instanceof contractSpec.Ok ? raw.unwrap() : raw;
+  if (!Array.isArray(value)) {
+    throw new Error(`registry page at start=${start} did not return a list`);
+  }
+  return value;
+}
+
+/**
  * Read every registered contract.
  *
  * Pages through `count` and `page`. The registry self-registers in its own
@@ -2096,6 +2176,12 @@ export async function discoverAll(
     const message = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`could not read registry count from ${registryId}: ${message}`, { cause });
   }
+  // A non-number here would make the loop below run zero times and return an
+  // empty list, so a keeper daemon would report "0 contracts" and sit there
+  // maintaining nothing while looking healthy. Fail loudly instead.
+  if (!Number.isInteger(total) || total < 0) {
+    throw new Error(`registry count from ${registryId} is not a whole number: ${String(total)}`);
+  }
 
   const entries: ManifestEntry[] = [];
   for (let start = 0; start < total; start += PAGE_LIMIT) {
@@ -2111,11 +2197,9 @@ export async function discoverAll(
       throw new Error(`registry page at start=${start} failed: ${message}`, { cause });
     }
 
-    if (!Array.isArray(page)) {
-      throw new Error(`registry page at start=${start} did not return a list`);
-    }
-    if (page.length === 0) break;
-    for (const item of page) {
+    const items = unwrapPage(page, start);
+    if (items.length === 0) break;
+    for (const item of items) {
       entries.push(decodeEntry(item));
     }
   }
@@ -2127,7 +2211,7 @@ export async function discoverAll(
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/discover.test.ts`
-Expected: PASS, 6 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Run everything**
 
@@ -2159,11 +2243,17 @@ for (const e of entries) {
 "
 ```
 
-Expected against the deployed testnet set: **at least 2 entries.** One is the
-registry itself, which self-registers in its constructor and will show
-`keys=1 threshold=100000 extendTo=500000`. Another is the long_escrow, which shows
-`keys=3`. Its contract id must equal `LK_REGISTRY_ID` for the first and your
-`LK_LONG_ESCROW_ID` for the second.
+Expected against the deployed testnet set — this is what the live chain returned
+when this plan was written, so treat any difference as a real finding:
+
+```
+registered contracts: 2
+ - CB7K56KG3KHC43FROV534M55FMVGBW24NUFQSXSRMH7OS54242GFYMGN keys=1 threshold=100000 extendTo=500000
+ - CASBZNG6KRKZYRQ22TVOGEYSRDIV7QSCJDFIMSII5LA7XXKIUXOX6NZ6 keys=3 threshold=100000 extendTo=500000
+```
+
+The first is the registry itself, which self-registers in its constructor and is
+maintained like any other contract. The second is the long_escrow example.
 
 Read the failure rather than working around it:
 
@@ -2193,8 +2283,13 @@ for (const e of entries) {
 Expected: the escrow prints exactly
 `[ 'LedgerKeyContractInstance', 'Vec[Symbol(Balance)]', 'Vec[Symbol(Milestones)]' ]`,
 matching the fixture in `test/discover.test.ts` and the values in core's
-`scripts/init_testnet.sh`. If the fixture and the live chain disagree, the fixture
-is wrong — report it before continuing.
+`scripts/init_testnet.sh`. The registry prints
+`[ 'LedgerKeyContractInstance' ]`. If the fixture and the live chain disagree, the
+fixture is wrong — report it before continuing.
+
+The live key bytes were read off testnet and are the fixture's hex verbatim:
+`00000014`, `0000001000000001000000010000000f0000000742616c616e636500`, and
+`0000001000000001000000010000000f0000000a4d696c6573746f6e65730000`.
 
 This step commits nothing. It is a gate.
 
