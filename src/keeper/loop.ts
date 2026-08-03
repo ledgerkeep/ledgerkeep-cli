@@ -127,6 +127,14 @@ export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry)
 
 /** One pass over every registered contract. */
 export async function runTick(ctx: KeeperContext): Promise<void> {
+  // Logged before discovery rather than after it. Discovery is a network round
+  // trip that takes seconds, so a "tick start" printed only once it returns leaves
+  // the tick's opening seconds silent. That gap is actively misleading: a SIGINT
+  // arriving mid-discovery prints "stopping" before "tick start", which reads as
+  // though the daemon began a whole new tick after being told to stop. It does not
+  // — but an operator watching a funded keeper cannot tell that from the log.
+  log.info("tick start", {});
+
   let entries: ManifestEntry[];
   try {
     entries = await discoverAll(ctx.server, ctx.config.registryId);
@@ -135,7 +143,7 @@ export async function runTick(ctx: KeeperContext): Promise<void> {
     return;
   }
 
-  log.info("tick start", { contracts: entries.length });
+  log.info("registry discovered", { contracts: entries.length });
 
   for (const entry of entries) {
     try {
