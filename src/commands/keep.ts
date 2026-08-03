@@ -14,8 +14,8 @@ export async function runKeep(): Promise<number> {
   const server = makeServer(config.rpcUrl);
   const keypair = loadKeypair(config);
 
-  const ctx: KeeperContext = { config, server, keypair };
   const controller = new AbortController();
+  const ctx: KeeperContext = { config, server, keypair, signal: controller.signal };
 
   const stop = (signalName: string) => {
     log.info("stopping", { signal: signalName });

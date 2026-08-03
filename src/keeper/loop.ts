@@ -13,6 +13,7 @@ export interface KeeperContext {
   config: Config;
   server: rpc.Server;
   keypair: Keypair;
+  signal: AbortSignal;
 }
 
 function errorMessage(cause: unknown): string {
@@ -145,7 +146,16 @@ export async function runTick(ctx: KeeperContext): Promise<void> {
 
   log.info("registry discovered", { contracts: entries.length });
 
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
+    if (ctx.signal.aborted) {
+      log.info("tick stopped early", {
+        reason: "aborted",
+        contractsMaintained: index,
+        contractsRemaining: entries.length - index,
+      });
+      return;
+    }
+
     try {
       await maintainContract(ctx, entry);
     } catch (cause) {
