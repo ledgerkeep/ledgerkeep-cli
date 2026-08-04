@@ -2,6 +2,7 @@ import { loadConfig, loadKeypair } from "../config.js";
 import { log } from "../log.js";
 import { makeServer } from "../rpc/client.js";
 import { runLoop, type KeeperContext } from "../keeper/loop.js";
+import { FutilityTracker } from "../keeper/futility.js";
 
 /**
  * Run the keeper daemon until interrupted.
@@ -15,7 +16,15 @@ export async function runKeep(): Promise<number> {
   const keypair = loadKeypair(config);
 
   const controller = new AbortController();
-  const ctx: KeeperContext = { config, server, keypair, signal: controller.signal };
+  const ctx: KeeperContext = {
+    config,
+    server,
+    keypair,
+    signal: controller.signal,
+    // Lives for the life of the process. Backoff state is deliberately not
+    // persisted: a restart retries every contract once.
+    futility: new FutilityTracker(),
+  };
 
   const stop = (signalName: string) => {
     log.info("stopping", { signal: signalName });

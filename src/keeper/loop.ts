@@ -1,12 +1,13 @@
-import type { Keypair, rpc } from "@stellar/stellar-sdk";
+import type { Keypair, rpc, xdr } from "@stellar/stellar-sdk";
 import type { Config } from "../config.js";
 import { log } from "../log.js";
 import { manifestLedgerKeys } from "../rpc/keys.js";
-import { readTtl } from "../rpc/ttl.js";
+import { readTtl, type TtlReading } from "../rpc/ttl.js";
 import { discoverAll, type ManifestEntry } from "../registry/discover.js";
 import { extendViaContract, simulateExtendAll } from "../ops/extendViaContract.js";
 import { decideMaintenance, effectiveThreshold } from "./policy.js";
 import { footprintDrift, ttlDrift } from "./drift.js";
+import { type FutilityTracker, obligatedReadings } from "./futility.js";
 
 /** Everything a tick needs, built once at daemon start. */
 export interface KeeperContext {
@@ -14,10 +15,27 @@ export interface KeeperContext {
   server: rpc.Server;
   keypair: Keypair;
   signal: AbortSignal;
+  futility: FutilityTracker;
 }
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+/**
+ * Did a paid extension move anything at all?
+ *
+ * The test is deliberately generous: one key gaining life anywhere makes the fee
+ * worth paying, so only a transaction that moved nothing counts as futile. A
+ * partial success — three low keys, two extended — must not trigger backoff, or
+ * the daemon would ration maintenance it is actually performing.
+ */
+function anyKeyImproved(before: TtlReading[], after: TtlReading[]): boolean {
+  const previous = new Map(before.map((reading) => [reading.keyId, reading.remaining]));
+  return after.some((reading) => {
+    const was = previous.get(reading.keyId);
+    return was !== undefined && reading.remaining > was;
+  });
 }
 
 /**
@@ -41,19 +59,40 @@ function lowest(readings: { remaining: number }[]): number {
 export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry): Promise<void> {
   const { config, server, keypair } = ctx;
   const contract = entry.contract;
+
+  // Checked before any RPC. A contract in a backoff window has already had its
+  // drift reported on the tick that opened the window, so re-reading it every
+  // minute to print the same warning buys the operator nothing.
+  const backoff = ctx.futility.consumeBackoff(contract);
+  if (backoff.skip) {
+    log.info("backing off", {
+      contract,
+      action: "skip",
+      result: "ok",
+      reason: "previous extensions changed nothing",
+      consecutiveFutile: backoff.consecutiveFutile,
+      ticksRemaining: backoff.ticksRemaining,
+    });
+    return;
+  }
+
   const threshold = effectiveThreshold(entry.threshold, config.threshold);
   const keys = manifestLedgerKeys(contract, entry.keysXdr);
 
   const { readings: before } = await readTtl(server, keys, threshold);
 
-  // Primary drift signal: free, and independent of whether TTL is low.
+  // Primary drift signal: free, and independent of whether TTL is low. The
+  // footprint is kept rather than only reported, because it is also the evidence
+  // for whether an extension could achieve anything.
+  let footprint: xdr.LedgerKey[] | null = null;
   try {
-    const { footprint } = await simulateExtendAll({
+    const simulated = await simulateExtendAll({
       server,
       networkPassphrase: config.networkPassphrase,
       contractId: contract,
       keeper: keypair.publicKey(),
     });
+    footprint = simulated.footprint;
     for (const finding of footprintDrift(keys, footprint)) {
       log.warn("manifest drift", {
         contract,
@@ -77,6 +116,31 @@ export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry)
       remainingBefore: lowest(before),
     });
     return;
+  }
+
+  // Something is below threshold. Whether extending would help is a separate
+  // question, and the footprint answers it for free. A manifest key the contract
+  // no longer extends will sit below threshold on every tick from now until the
+  // owner republishes the manifest; without this gate that is one paid
+  // transaction per tick, forever, each one logging exactly why it was pointless.
+  //
+  // A failed simulation leaves no footprint, and an absent signal is not evidence
+  // of futility, so that case falls through to the extension it would have made
+  // anyway.
+  if (footprint !== null) {
+    const obligated = obligatedReadings(before, footprint);
+    if (!decideMaintenance(obligated, threshold).needed) {
+      log.warn("skipping futile extension", {
+        contract,
+        action: "skip",
+        result: "ok",
+        reason: "no key below threshold appears in the extend_all footprint",
+        lowKeys: decision.lowKeys,
+        archivedKeys: decision.archivedKeys,
+        footprintKeys: footprint.length,
+      });
+      return;
+    }
   }
 
   log.info("maintenance needed", {
@@ -115,6 +179,24 @@ export async function maintainContract(ctx: KeeperContext, entry: ManifestEntry)
       keyId: finding.keyId,
       description: finding.description,
       detail: finding.detail,
+    });
+  }
+
+  // The footprint filter above catches futility it can predict. This catches the
+  // rest: a key the contract reads but never extends is in the footprint and
+  // passes that gate, and a failed simulation skips the gate entirely. Both end
+  // here, having paid a fee for nothing.
+  if (anyKeyImproved(before, after)) {
+    ctx.futility.recordProductive(contract);
+  } else {
+    const record = ctx.futility.recordFutile(contract);
+    log.warn("extension changed nothing", {
+      contract,
+      action: "extend",
+      result: "futile",
+      hash,
+      consecutiveFutile: record.consecutiveFutile,
+      ticksToSkip: record.ticksToSkip,
     });
   }
 
