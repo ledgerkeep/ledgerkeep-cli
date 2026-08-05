@@ -23,7 +23,7 @@ leaving one running unattended.
 
 ## Reporting a vulnerability
 
-Email **<CONTACT>**. Do not open a public issue.
+Email **dillonofili667@gmail.com**. Do not open a public issue.
 
 Include whatever you have:
 
