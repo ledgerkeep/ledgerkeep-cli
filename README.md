@@ -135,6 +135,34 @@ lkeep keep | jq 'select(.level == "warn")'
 - **Claiming tips.** The CLI does not interact with `rent_vault`.
 - **Repairing drift.** Reported, not fixed.
 
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup steps, the
+commit format, and what a pull request needs to pass.
+
+The short version: commits follow [Conventional Commits](https://www.conventionalcommits.org/) —
+`type(scope): description`, one logical change per commit. `npm run format:check`, `npm run lint`,
+`npm run build` and `npm test` must all be clean before anything merges; CI enforces all four on
+Node 22 and Node 24.
+
+This tool signs and submits transactions, and it is not audited. You are responsible for your own
+keys — `LK_KEEPER_KEY` is a path to a plaintext seed file, so treat it accordingly. To report a
+vulnerability, see [SECURITY.md](SECURITY.md) — please do not open a public issue for one.
+
+## Maintainers
+
+| Name         | Role       | GitHub                                 | Contact     |
+| ------------ | ---------- | -------------------------------------- | ----------- |
+| Dillon Ofili | Maintainer | [@0dillon](https://github.com/0dillon) | `<CONTACT>` |
+
+## Contributors
+
+<!-- Renders contributor avatars once the repo has any. -->
+
+<a href="https://github.com/ledgerkeep/ledgerkeep-cli/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ledgerkeep/ledgerkeep-cli" />
+</a>
+
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE).
