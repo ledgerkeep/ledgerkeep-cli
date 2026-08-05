@@ -146,8 +146,8 @@ This tool signs and submits transactions. You are responsible for the keys you p
 
 ## Maintainers
 
-| Name         | Role       | GitHub                                 | Contact     |
-| ------------ | ---------- | -------------------------------------- | ----------- |
+| Name         | Role       | GitHub                                 | Contact                  |
+| ------------ | ---------- | -------------------------------------- | ------------------------ |
 | Dillon Ofili | Maintainer | [@0dillon](https://github.com/0dillon) | dillonofili667@gmail.com |
 
 ## Contributors
