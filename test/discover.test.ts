@@ -86,7 +86,12 @@ describe("unwrapPage", () => {
   });
 
   it("throws on an Err, naming the start offset", () => {
-    expect(() => unwrapPage(new contractSpec.Err("LimitTooLarge"), 50)).toThrow(/start=50/);
+    // The SDK types `Err` as wrapping an `ErrorMessage` ({ message }), not a
+    // bare string; `unwrapPage` only stringifies it, so the payload is not
+    // asserted on here.
+    expect(() => unwrapPage(new contractSpec.Err({ message: "LimitTooLarge" }), 50)).toThrow(
+      /start=50/,
+    );
   });
 
   it("throws when the payload is not a list", () => {

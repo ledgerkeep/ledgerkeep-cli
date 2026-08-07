@@ -48,11 +48,8 @@ network — nothing in the suite makes an RPC call. Code that talks to a server 
 structural fake, as in `test/futility.test.ts`, which stands up an object shaped like `rpc.Server`
 and asserts on which calls it received.
 
-Two things worth knowing before you add a test:
+One thing worth knowing before you add a test:
 
-- **`test/` is not type-checked.** `tsconfig.json` excludes it, so `npm run build` will not catch a
-  type error in a test file. This is a known gap with an open issue against it; until it closes, do
-  not assume a green build means your test compiles under `strict`.
 - **Relative imports need the `.js` extension**, including in tests. The package is
   `"type": "module"` with `moduleResolution: "NodeNext"`, so `../src/keeper/loop.js` is correct even
   though the file on disk is `loop.ts`.

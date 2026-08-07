@@ -51,7 +51,10 @@ describe("classify", () => {
 
 describe("buildReadings", () => {
   it("pairs each requested key with its entry", () => {
-    const keys = [instanceLedgerKey(CONTRACT), symbolKey("Balance")];
+    const keys: [xdr.LedgerKey, xdr.LedgerKey] = [
+      instanceLedgerKey(CONTRACT),
+      symbolKey("Balance"),
+    ];
     const entries = [
       { key: keys[0], val: {}, liveUntilLedgerSeq: 600_000 },
       { key: keys[1], val: {}, liveUntilLedgerSeq: 150_000 },
@@ -68,7 +71,10 @@ describe("buildReadings", () => {
   });
 
   it("marks a key the RPC omitted as archived", () => {
-    const keys = [instanceLedgerKey(CONTRACT), symbolKey("Milestones")];
+    const keys: [xdr.LedgerKey, xdr.LedgerKey] = [
+      instanceLedgerKey(CONTRACT),
+      symbolKey("Milestones"),
+    ];
     const entries = [{ key: keys[0], val: {}, liveUntilLedgerSeq: 600_000 }];
     const readings = buildReadings(keys, entries, 100_000, 100_000);
 
