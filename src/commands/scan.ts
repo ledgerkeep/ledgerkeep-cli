@@ -52,11 +52,16 @@ export async function runScan(contractId: string): Promise<number> {
       log.info("key ok", fields);
     } else if (reading.status === "low") {
       log.warn("key low", fields);
-    } else {
+    } else if (reading.status === "archived") {
       log.warn("key archived", {
         ...fields,
         note: "the next extend_all restores this automatically under Protocol 23",
       });
+    } else {
+      // Exhaustive: a new TtlStatus variant must fail the build here rather
+      // than be silently reported as archived. Unreachable today.
+      const unhandled: never = reading.status;
+      throw new Error(`unhandled TtlStatus ${unhandled} for key ${reading.description}`);
     }
   }
 
